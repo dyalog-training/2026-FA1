@@ -162,3 +162,35 @@ pattern:
    
 We will introduce each of these problems together, and then you can go ahead 
 and play with the ones you find most interesting at your leisure! 
+
+## The "Design Questions"
+
+For each design pattern, there are a set of design questions that you want to 
+ask yourself to help make sure that you are on the right track. 
+
+Sequence Enumeration:
+
+1. What are my input events/stimuli?
+2. What are my output events/stimuli?
+3. For each possible sequence of input events, what is the (possibly null) output?
+4. For each possible sequence of input events, is this equivalent to some smaller input sequence that I have seen before? 
+
+Fixed-points:
+
+1. What is my termination condition? 
+2. Is my code consistently approaching that termination condition? That is, am I 
+   approaching my termination condition on each iteration? 
+
+Divide-and-Conquer:
+
+1. What is my base case? 
+2. What is my recursive case? 
+3. Is my recursive case always "shrinking" my inputs?
+4. What do I do with the results of each recursion?
+
+Notice that the main concern in the fixed-point and divide-and-conquer patterns 
+is on ensuring that they terminate. This is the primary thing you need to make 
+sure you get right for these cases, to ensure that your code doesn't loop forever. 
+If you want to make a kind of server that runs indefinitely, you are almost 
+certainly dealing with a sequence enumeration sort of problem. 
+
