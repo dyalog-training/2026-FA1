@@ -1,0 +1,135 @@
+:Require file://mu.apln
+:Namespace SQEN
+
+⎕IO←0
+
+mu←#.mu
+
+alarm←0
+light←0
+
+⍝ Input Stimuli
+S←1 ⍝ Set button was pressed
+T←2 ⍝ Alarm wire tripped
+B←3 ⍝ Bad password digit was pressed
+C←4 ⍝ Clear button was pressed
+G←5 ⍝ Good password digit was pressed
+
+sound←8192⍴1○○(⍳100)÷100
+
+∇ Z←SYSTEM lc;opts;res;good_bad;asz
+  Z←0
+  
+  good_bad←{(B G)[password[pidx]=⍵]}
+  
+  opts←mu.MT_OPT
+  opts[mu.(OPT_NOFRAME OPT_NOTITLE OPT_NOCLOSE OPT_NOSCROLL OPT_NORESIZE)]←1
+  
+ MAIN:→CONT EXIT[(0≠Z)∨⊃res state←mu.do_render struct width height state]
+ EXIT:Z←(Z≠0)×Z+lc ⋄ →0
+ CONT:mu.begin ⋄ →ALARM_BOX
+ 
+ ALARM_BOX:res←opts mu.begin_window 'Alarm Box' (0 0 width height)
+  →CLOSED OPEN[mu.RES_ACTIVE⊃res]
+ CLOSED:⎕SIGNAL 99
+ OPEN:
+  mu.layout_row 3 0
+  Z⌈←T×mu.RES_SUBMIT⊃mu.button 'Trip Alarm'
+  mu.layout_next mu.draw_rect (light×3⍴255),255
+  mu.layout_next mu.draw_rect alarm×255 0 0 255
+  Z⌈←S×mu.RES_SUBMIT⊃mu.button 'Set'
+  pidx×←0=Z⌈←C×mu.RES_SUBMIT⊃mu.button 'Clear'
+  mu.layout_row 3 0
+  {Z⌈←(good_bad ⍵)×mu.RES_SUBMIT⊃mu.button (⍕⍵)}¨1+⍳9
+  {}mu.layout_next ⋄ Z⌈←(good_bad 0)×mu.RES_SUBMIT⊃mu.button '0'
+  mu.end_window ⋄ mu.end
+  Z×←light∨Z=S ⋄ pidx+←G=Z ⋄ pidx⌈←(B=Z)×(≢password)-1
+  →ALARM
+ 
+ ALARM:→FULL READY[0<asz←fa_avail aptr]
+ FULL:→MAIN
+ READY:{}fa_write aptr (alarm×asz⍴sound) asz ⋄ →MAIN
+∇
+
+∇ {Z}←Run password;width;height;struct;state;pidx;aptr
+
+  'fa_get'⎕NA'P fenster.dll|fenster_audio_get'
+  'fa_open'⎕NA'I fenster.dll|fenster_audio_open P'
+  'fa_avail'⎕NA'I fenster.dll|fenster_audio_available P'
+  'fa_write'⎕NA'fenster.dll|fenster_audio_write P <F4[] U8'
+  'fa_close'⎕NA'fenster.dll|fenster_audio_close P'
+
+  width←85×3 ⋄ height←6×33 ⋄ pidx←0 ⋄ password←(3↑password),¯1
+  {}fa_open⊢aptr←fa_get
+  →0⍴⍨0=⊃struct state←mu.begin_render 'Sequence Enumeration Exercise' width height
+  SPEC
+  {}fa_close aptr
+  mu.end_render struct ⋄ →0
+∇
+
+∇SPEC
+ ∆_: →SYSTEM ⎕LC
+ ∆_S:            light←1                ⋄ →∆_S_
+ ∆_T:            ∘∘∘                     ⋄ →0
+ ∆_B:            ∘∘∘                     ⋄ →0
+ ∆_C:            ∘∘∘                     ⋄ →0
+ ∆_G:            ∘∘∘                     ⋄ →0
+ 
+ ∆_S_:→SYSTEM ⎕LC
+ ∆_S_S:                                  ⋄ →∆_S_
+ ∆_S_T:          alarm←1                ⋄ →∆_S_T_
+ ∆_S_B:                                  ⋄ →∆_S_B_
+ ∆_S_C:                                  ⋄ →∆_S_
+ ∆_S_G:                                  ⋄ →∆_S_G_
+ 
+ ∆_S_T_:→SYSTEM ⎕LC
+ ∆_S_T_S:                                ⋄ →∆_S_T_
+ ∆_S_T_T:                                ⋄ →∆_S_T_
+ ∆_S_T_B:                                ⋄ →∆_S_T_B_
+ ∆_S_T_C:                                ⋄ →∆_S_T_
+ ∆_S_T_G:                               ⋄ →∆_S_T_G_
+ 
+ ∆_S_B_:→SYSTEM ⎕LC
+ ∆_S_B_S:                                ⋄ →∆_S_B_
+ ∆_S_B_T:        alarm←1                ⋄ →∆_S_T_B_
+ ∆_S_B_B:                                ⋄ →∆_S_B_
+ ∆_S_B_C:                                ⋄ →∆_S_
+ ∆_S_B_G:        ∘∘∘                     ⋄ →∆_S_B_G_
+ 
+ ∆_S_G_:→SYSTEM ⎕LC
+ ∆_S_G_S:                                ⋄ →∆_S_G_
+ ∆_S_G_T:        alarm←1                ⋄ →∆_S_T_B_
+ ∆_S_G_B:                                ⋄ →∆_S_B_
+ ∆_S_G_C:                                ⋄ →∆_S_
+ ∆_S_G_G:                                ⋄ →∆_S_G_G_
+ 
+ ∆_S_T_B_:→SYSTEM ⎕LC
+ ∆_S_T_B_S:                              ⋄ →∆_S_T_B_
+ ∆_S_T_B_T:                              ⋄ →∆_S_T_B_
+ ∆_S_T_B_B:                              ⋄ →∆_S_T_B_
+ ∆_S_T_B_C:                              ⋄ →∆_S_T_
+ ∆_S_T_B_G:      ∘∘∘                     ⋄ →∆_S_G_G_
+ 
+ ∆_S_T_G_:→SYSTEM ⎕LC
+ ∆_S_T_G_S:                              ⋄ →∆_S_T_G_
+ ∆_S_T_G_T:                              ⋄ →∆_S_T_G_
+ ∆_S_T_G_B:                              ⋄ →∆_S_T_B_
+ ∆_S_T_G_C:                              ⋄ →∆_S_T_
+ ∆_S_T_G_G:                              ⋄ →∆_S_T_G_G_
+ 
+ ∆_S_G_G_:→SYSTEM ⎕LC
+ ∆_S_G_G_S:                              ⋄ →∆_S_G_G_
+ ∆_S_G_G_T:      alarm←1                ⋄ →∆_S_T_B_
+ ∆_S_G_G_B:                              ⋄ →∆_S_B_
+ ∆_S_G_G_C:                              ⋄ →∆_S_
+ ∆_S_G_G_G:      light←0                ⋄ →∆_
+ 
+ ∆_S_T_G_G_:→SYSTEM ⎕LC
+ ∆_S_T_G_G_S:                            ⋄ →∆_S_T_G_G_
+ ∆_S_T_G_G_T:                            ⋄ →∆_S_T_G_G_
+ ∆_S_T_G_G_B:                            ⋄ →∆_S_T_B_
+ ∆_S_T_G_G_C:                            ⋄ →∆_S_T_
+ ∆_S_T_G_G_G:    alarm←0 ⋄ light←0     ⋄ →∆_
+∇
+
+:EndNamespace
