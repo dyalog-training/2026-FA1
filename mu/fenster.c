@@ -1,6 +1,10 @@
 /* Copyright (c) 2026 Aaron W. Hsu */
 
+#ifdef _WIN32
 #define FENSTER_API __declspec(dllexport)
+#else
+#define FENSTER_API extern
+#endif
 
 #include <stdlib.h>
 #include <string.h>
