@@ -3,7 +3,9 @@
 
 ⎕IO←0
 
+opsys←{⍵⊃⍨'Win' 'Lin' 'Mac'⍳⊂3↑⊃'.'⎕WG'APLVersion'}
 mu←#.mu
+fenster←mu.fenster_dll←opsys 'fenster.dll' 'fenster.so' 'fenster.dylib'
 
 alarm←0
 light←0
@@ -53,11 +55,11 @@ sound←8192⍴1○○(⍳100)÷100
 
 ∇ {Z}←Run password;width;height;struct;state;pidx;aptr
 
-  'fa_get'⎕NA'P fenster.dll|fenster_audio_get'
-  'fa_open'⎕NA'I fenster.dll|fenster_audio_open P'
-  'fa_avail'⎕NA'I fenster.dll|fenster_audio_available P'
-  'fa_write'⎕NA'fenster.dll|fenster_audio_write P <F4[] U8'
-  'fa_close'⎕NA'fenster.dll|fenster_audio_close P'
+  'fa_get'⎕NA'P ',fenster,'|fenster_audio_get'
+  'fa_open'⎕NA'I ',fenster,'|fenster_audio_open P'
+  'fa_avail'⎕NA'I ',fenster,'|fenster_audio_available P'
+  'fa_write'⎕NA'',fenster,'|fenster_audio_write P <F4[] U8'
+  'fa_close'⎕NA'',fenster,'|fenster_audio_close P'
 
   width←85×3 ⋄ height←6×33 ⋄ pidx←0 ⋄ password←(3↑password),¯1
   {}fa_open⊢aptr←fa_get
