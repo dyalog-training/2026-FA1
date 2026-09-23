@@ -1,0 +1,138 @@
+:Require file://mu.apln
+:Namespace SQEN
+
+⎕IO←0
+
+mu←#.mu
+
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+⍝ Sequence Enumeration Exercise! ⍝
+⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝⍝
+
+⍝ You are designing an alarm system and it is your job to make sure that the 
+⍝ alarm behaves the way that it should. Here are the system requirements:
+⍝ 
+⍝ 1  The security alarm has a detector that sends a trip signal when motion is 
+⍝    detected.
+⍝ 2  The security alarm is activated by pressing the Set button.
+⍝ 3  The Set button is illuminated when the security alarm is set.
+⍝ 4  If a trip signal occurs while the security alarm is set, a high pitched tone 
+⍝    (alarm) is emitted.
+⍝ 5  A three-digit code must be entered to turn off the alarm tone.
+⍝ 6  Correct entry of the code deactivates the security alarm.
+⍝ 7  If a mistake is made when entering the code, the user must press the Clear 
+⍝    button before the code can be reentered. 
+⍝ 
+⍝ Your alarm system has a light on it and an alarm that can sound. You need to 
+⍝ make sure that the alarm is sounding at the right times and that the light 
+⍝ properly indicates when the system is armed or when it is disarmed. In this 
+⍝ case, your system expects to see whether the system is armed or not by the 
+⍝ Boolean variable `light`, and whether the alarm is on or off by the Boolean 
+⍝ variable `alarm`. 
+
+alarm←0
+light←0
+
+⍝ We've done some of the hard work for you already by defining a set of input 
+⍝ stimuli that you can receive from your system. They are as follows:
+⍝ 
+⍝ Input Stimuli:
+
+S←1 ⍝ Set button was pressed
+T←2 ⍝ Alarm wire tripped
+B←3 ⍝ Bad password digit was pressed
+C←4 ⍝ Clear button was pressed
+G←5 ⍝ Good password digit was pressed
+
+∇ SPEC
+
+⍝ Here's a beginning sketch for your specification/state machine. 
+⍝ Notice that each state is indicated by a starting label (we use _ as a suffix 
+⍝ to denote such labels). You then need to call the SYSTEM function with ⎕LC
+⍝ to wait to get your next event/stimuli. 
+⍝ 
+⍝ Your job is to fill out the first state, and then continue filling out each 
+⍝ new state that is required to be specified until all transitions branch back 
+⍝ to previous states and don't branch to any new sequences. 
+⍝ 
+⍝ We've sketched out an example of the first two states, where you have seen
+⍝ nothing (the first state), and the second state, where you have already seen 
+⍝ the S stimuli occur. 
+
+ ∆_: →SYSTEM ⎕LC
+ ∆_S: Respones/Events/State changes go here ⋄ →Where to next? 
+ ∆_T: ⋄ →
+ ∆_B: ⋄ →
+ ∆_C: ⋄ →
+ ∆_G: ⋄ →
+ 
+ ∆_S_:→SYSTEM ⎕LC
+ ∆_S_S: 
+ ∆_S_T: 
+ ∆_S_B: 
+ ∆_S_C: 
+ ∆_S_G: 
+ 
+∇
+
+⍝ All the code below has been given to you to help you play with the above 
+⍝ specification so that you can see if your system behaves the way you expect. 
+⍝ You should not need to touch any of the code below this point. 
+⍝ 
+⍝ To run and test the system, you can call `SQEN.Run password` with the 3-digit 
+⍝ password you want to use to test the system. It will use SPEC to control its 
+⍝ behavior. 
+
+sound←8192⍴1○○(⍳100)÷100
+
+∇ Z←SYSTEM lc;opts;res;good_bad;asz
+  Z←0
+  
+  good_bad←{(B G)[password[pidx]=⍵]}
+  
+  opts←mu.MT_OPT
+  opts[mu.(OPT_NOFRAME OPT_NOTITLE OPT_NOCLOSE OPT_NOSCROLL OPT_NORESIZE)]←1
+  
+ MAIN:→CONT EXIT[(0≠Z)∨⊃res state←mu.do_render struct width height state]
+ EXIT:Z←(Z≠0)×Z+lc ⋄ →0
+ CONT:mu.begin ⋄ →ALARM_BOX
+ 
+ ALARM_BOX:res←opts mu.begin_window 'Alarm Box' (0 0 width height)
+  →CLOSED OPEN[mu.RES_ACTIVE⊃res]
+ CLOSED:⎕SIGNAL 99
+ OPEN:
+  mu.layout_row 3 0
+  Z⌈←T×mu.RES_SUBMIT⊃mu.button 'Trip Alarm'
+  mu.layout_next mu.draw_rect (light×3⍴255),255
+  mu.layout_next mu.draw_rect alarm×255 0 0 255
+  Z⌈←S×mu.RES_SUBMIT⊃mu.button 'Set'
+  pidx×←0=Z⌈←C×mu.RES_SUBMIT⊃mu.button 'Clear'
+  mu.layout_row 3 0
+  {Z⌈←(good_bad ⍵)×mu.RES_SUBMIT⊃mu.button (⍕⍵)}¨1+⍳9
+  {}mu.layout_next ⋄ Z⌈←(good_bad 0)×mu.RES_SUBMIT⊃mu.button '0'
+  mu.end_window ⋄ mu.end
+  Z×←light∨Z=S ⋄ pidx+←G=Z ⋄ pidx⌈←(B=Z)×(≢password)-1
+  →ALARM
+ 
+ ALARM:→FULL READY[0<asz←fa_avail aptr]
+ FULL:→MAIN
+ READY:{}fa_write aptr (alarm×asz⍴sound) asz ⋄ →MAIN
+∇
+
+∇ {Z}←Run password;width;height;struct;state;pidx;aptr
+
+  'fa_get'⎕NA'P fenster.dll|fenster_audio_get'
+  'fa_open'⎕NA'I fenster.dll|fenster_audio_open P'
+  'fa_avail'⎕NA'I fenster.dll|fenster_audio_available P'
+  'fa_write'⎕NA'fenster.dll|fenster_audio_write P <F4[] U8'
+  'fa_close'⎕NA'fenster.dll|fenster_audio_close P'
+
+  width←85×3 ⋄ height←6×33 ⋄ pidx←0 ⋄ password←(3↑password),¯1
+  {}fa_open⊢aptr←fa_get
+  →0⍴⍨0=⊃struct state←mu.begin_render 'Sequence Enumeration Exercise' width height
+  SPEC
+  {}fa_close aptr
+  mu.end_render struct ⋄ →0
+∇
+
+:EndNamespace
