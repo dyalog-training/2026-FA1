@@ -2,9 +2,11 @@
 
 #define FENSTER_API __declspec(dllexport)
 
-#include "fenster.h"
 #include <stdlib.h>
 #include <string.h>
+
+#include "fenster.h"
+#include "fenster_audio.h"
 
 #define DATA(pp) ((void *)&(pp)->shape[(pp)->rank])
 
@@ -109,4 +111,12 @@ fenster_close_apl(struct fenster *f)
 {
 	fenster_close(f);
 	free(f);
+}
+
+struct fenster_audio fa;
+
+FENSTER_API struct fenster_audio *
+fenster_audio_get(void)
+{
+	return &fa;
 }
