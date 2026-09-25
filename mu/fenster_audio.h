@@ -118,7 +118,6 @@ FENSTER_API void fenster_audio_write(struct fenster_audio *fa, float *buf,
 }
 #elif defined(_WIN32)
 FENSTER_API int fenster_audio_open(struct fenster_audio *fa) {
-  MMRESULT res;
   WAVEFORMATEX wfx = {WAVE_FORMAT_PCM, 1, FENSTER_SAMPLE_RATE, FENSTER_SAMPLE_RATE * 2, 2, 16, 0};
   waveOutOpen(&fa->wo, WAVE_MAPPER, &wfx, 0, 0, CALLBACK_NULL);
   for (int i = 0; i < 2; i++) {
