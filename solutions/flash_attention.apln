@@ -1,0 +1,53 @@
+:Namespace flash_attention
+
+⎕IO ⎕CT←0
+
+cases←(16384 64)(32768 64)(8192 128)(16384 128)
+
+L2←{(0.5*⍨+⌿×⍨,⍵)-0.5*⍨×⌿⍺}
+
+Q←⍬ ⋄ K←⍬ ⋄ V←⍬
+
+attn←{(fx÷[0]+/fx←*S-[0]⌈/S←Q+.×⍉K)+.×V}
+
+flash_attn←{M←⍺ ⍝ 2*23
+	Qs←⍴Q ⋄ N←0⊃Qs ⋄ d←1⊃Qs ⋄ Br←d⌊Bc←⌈M÷4×d ⋄ Tr←⌈N÷Br ⋄ Tc←⌈N÷Bc
+	Q←Tr Br d⍴Q ⋄ K←Tc Bc d⍴K ⋄ V←Tc Bc d⍴V
+	O←Tr Br d⍴0.5-0.5 ⋄ l←Br⍴0.5-0.5 ⋄ m←Br⍴⌈⌿⍬
+	_←{i←⍵ ⋄ Oi←O[i;;] ⋄ Qi←Q[i;;] ⋄ mi←Br⍴m ⋄ li←l
+		O[i;;]←Oi⊣{j←⍵ ⋄ Kj←K[j;;] ⋄ Vj←V[j;;]
+			mij←⌈/Sij←Qi+.×⍉Kj ⋄ lij←+/Pij←*Sij-[0]mij
+			li∆←(eli←li×*mi-mi∆)+lij×eij←*mij-mi∆←mi⌈mij
+			Oi⊢←li∆÷[0]⍨(eli×[0]Oi)+eij×[0]Pij+.×Vj
+			li⊢←li∆ ⋄ mi⊢←mi∆	
+		⍵+1}⍣Tc⊢0
+	⍵+1}⍣Tr⊢0
+	N d⍴O
+}
+
+Run←{N d←⍵⊃cases ⋄ ⍺←⊢ ⋄ M←⍺⊣2*23
+	Q K V∘←N d∘⍴¨1 1 1
+	Gflops←((N*2)×(4×d)+5)÷2*30
+	
+	⎕←'Running naive version...'
+	
+	start←24 60 60 1000⊥¯4↑⎕TS
+	res←attn ⍬
+	end←24 60 60 1000⊥¯4↑⎕TS
+	⍝ ⎕←'Naive L2: ',⍕N d L2 res
+	⎕←'Naive Attention time elapsed: ',(⍕time←(end-start)÷1000),'secs'
+	⎕←(⍕d N),' Flash Attention throughput: ',(⍕Gflops÷time),' Gflops/sec'
+		
+	_←M kernel.flash_attn ⍬
+	start←24 60 60 1000⊥¯4↑⎕TS
+	res←M flash_attn ⍬
+	end←24 60 60 1000⊥¯4↑⎕TS
+	time←(end-start)÷1000
+	⍝ ⎕←'Flash Attention L2: ',⍕N d L2 res
+	⎕←'Flash Attention time elapsed: ',(⍕time),'secs'
+	⎕←(⍕d N),' Flash Attention throughput: ',(⍕Gflops÷time),' Gflops/sec'
+	
+	1:shy←res
+}
+
+:EndNamespace

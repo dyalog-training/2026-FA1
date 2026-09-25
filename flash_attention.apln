@@ -1,0 +1,67 @@
+:Namespace flash_attention
+
+⍝ FlashAttention is a good example of an algorithm in which we have a much 
+⍝ nicer expression of the actual computation in plain APL, but the memory
+⍝ and execution behaviors are not sufficient for our needs. 
+⍝ 
+⍝ In this case, we are going to do a tiling optimization to help make the 
+⍝ attention algorithm more cache friendly. See the FlashAttention paper, 
+⍝ Algorithm 1 for the pseudo-code that you are going to implement. 
+
+⎕IO ⎕CT←0
+
+⍝ We will use the following four cases to benchmark our code. These specify 
+⍝ the values of N and d in our algorithm. 
+
+cases←(16384 64)(32768 64)(8192 128)(16384 128)
+
+⍝ The attention algorithm uses the following core data variables.
+
+Q←⍬ ⋄ K←⍬ ⋄ V←⍬
+
+⍝ Here is a naive attention algorithm expressed in simple APL, along with 
+⍝ a simple L2 normalization function to check the results.
+
+L2←{(0.5*⍨+⌿×⍨,⍵)-0.5*⍨×⌿⍺}
+attn←{(fx÷[0]+/fx←*S-[0]⌈/S←Q+.×⍉K)+.×V}
+
+⍝ Your job will be to implement Algorithm 1 from the paper above. Good luck!
+⍝ Here's the basic skeleton:
+
+flash_attn←{M←⍺ ⍝ Getting a block size, defaulting to 2*23
+
+	∘∘∘ ⍝ The algorithm goes here!
+
+	N d⍴O
+}
+
+⍝ And here's some code to run and benchmark the results! You'll call Run cn
+⍝ where cn is the case index into the cases variable above that indicates 
+⍝ which case you want to run. 
+
+Run←{N d←⍵⊃cases ⋄ ⍺←⊢ ⋄ M←⍺⊣2*23
+	Q K V∘←N d∘⍴¨1 1 1
+	Gflops←((N*2)×(4×d)+5)÷2*30
+	
+	⎕←''
+	⎕←'Running naive version...'
+	
+	start←24 60 60 1000⊥¯4↑⎕TS
+	res←attn ⍬
+	end←24 60 60 1000⊥¯4↑⎕TS
+	⍝ ⎕←'Naive L2: ',⍕N d L2 res
+	⎕←'Naive Attention time elapsed: ',(⍕time←(end-start)÷1000),'secs'
+	⎕←(⍕d N),' Naive Attention throughput: ',(⍕Gflops÷time),' Gflops/sec'
+		
+	start←24 60 60 1000⊥¯4↑⎕TS
+	res←M flash_attn ⍬
+	end←24 60 60 1000⊥¯4↑⎕TS
+	time←(end-start)÷1000
+	⍝ ⎕←'Flash Attention L2: ',⍕N d L2 res
+	⎕←'Flash Attention time elapsed: ',(⍕time),'secs'
+	⎕←(⍕d N),' Flash Attention throughput: ',(⍕Gflops÷time),' Gflops/sec'
+	
+	1:shy←res
+}
+
+:EndNamespace
