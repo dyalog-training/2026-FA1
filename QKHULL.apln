@@ -1,0 +1,118 @@
+:Namespace QKHULL
+
+⍝ Quickhull is an algorithm for computing the convex hull of a set of points. 
+⍝ That is, we are looking to discover the set of points in an n-dimensional 
+⍝ space that, when connected by edges, fully encloses all of the points. 
+⍝ 
+⍝ Quickhull is a classic divide-and-conquer algorithm that is a lot like 
+⍝ quicksort. Here's the basic idea (taken from Wikipedia's article that you 
+⍝ can find in the references\ directory):
+⍝
+⍝ 1. Find the points with minimum and maximum x coordinates, as these will 
+⍝    always be part of the convex hull. If many points with the same 
+⍝    minimum/maximum x exist, use the ones with the minimum/maximum y, respectively.
+⍝ 2. Use the line formed by the two points to divide the set into two subsets 
+⍝    of points, which will be processed recursively. We next describe how to 
+⍝    determine the part of the hull above the line; the part of the hull below 
+⍝    the line can be determined similarly.
+⍝ 3. Determine the point above the line with the maximum distance from the 
+⍝    line. This point forms a triangle with the two points on the line.
+⍝ 4. The points lying inside of that triangle cannot be part of the convex hull 
+⍝    and can therefore be ignored in the next steps.
+⍝ 5. Recursively repeat the previous two steps on the two lines formed by the 
+⍝    two new sides of the triangle.
+⍝ 6. Continue until no more points are left, the recursion has come to an end 
+⍝    and the points selected constitute the convex hull.
+⍝
+⍝ Since we are dealing with floating point values, we have a choice about 
+⍝ comparison tolerance to consider. For our purposes, it's a little easier 
+⍝ to just set ⎕CT←0.
+
+⎕CT←0
+
+⍝ To help you play around, we have a set of datasets available in the input\
+⍝ directory that you can use to determine whether or not your algorithm is 
+⍝ doing the right thing or not.
+
+dataset←⊂'input/1M_rectangle.dat'  ⍝ Roughly 25 points, (+,-)1
+dataset,←⊂'input/1M_circle.dat'    ⍝ Roughly 335 points (+,-)1
+dataset,←⊂'input/1M_quadratic.dat' ⍝ Roughly 124600 points (+,-)30
+
+⍝ The number of points on the hull is subject to floating-point tolerance and 
+⍝ order of operations, so as long as you are getting very close to the number 
+⍝ of points you see above, you can consider yourself correct. The suggested 
+⍝ tolerance range is given above. 
+⍝
+⍝ To run the code, we'll have the following runner, which takes an index into 
+⍝ dataset above. It reads in the datapoints from the dataset and then calls
+⍝ qhull on the points. 
+
+Run←{
+	⎕←'Initializing data from ',(⍵⊃dataset),'...'
+	tie←(⍵⊃dataset)⎕NTIE 0
+	points←(((⍴points)÷2),2)⍴points←⎕NREAD tie 323 ¯1 0
+	
+	⎕←'Running QuickHull...'
+	start←24 60 60 1000⊥¯4↑⎕TS
+	res←qhull points
+	end←24 60 60 1000⊥¯4↑⎕TS
+
+	⎕←⍴⊃,∘⍪⌿res
+	⎕←'QuickHull time elapsed: ',(⍕(end-start)÷1000),'secs'
+	1:shy←res
+}
+
+⍝ The points data is put into a two-column matrix of x and y values. 
+⍝ While this is the format that you get the data in, feel free to change 
+⍝ the way that you work with the data if you feel that it would help you 
+⍝ write your iteration more clearly or result in faster code. 
+⍝ We have included a little timer to help you figure out whether your code 
+⍝ is faster or slower than any other design. 
+⍝
+⍝ Here's a suggested start on qhull:
+⍝   L	Set of points ordered by their x value
+⍝   R	Boolean vector describing subgroups of L
+⍝   K	Keys describing the same information as R
+
+qhull←{L←⍵[⍋⍵[;0];] ⋄ R←1⌽(≢L)↑1 1 ⋄ K←(+⍀R)-1
+
+⍝ A key insight into this algorithm that allows us to turn this into a simpler 
+⍝ iterative algorithm instead of a recursive one is that we can flatten the 
+⍝ recursions into working on the divided vertices at the same time, since 
+⍝ we can treat one group as the "inverse" of another. That is, if we have a 
+⍝ line A←→B that divides our vertices, we can treat the group below the 
+⍝ A←→B line as above it from the orientation of a B←→A line. 
+⍝ So, the first thing we do is arrange for this to occur by figuring out the 
+⍝ initial two groups split along the starting line, and splitting them up so 
+⍝ that they appear in reverse order and will "work" on the hull in "reverse" 
+⍝ orientation. 
+
+	msk←¯1=×-/((1⊖R1)-R1)[K;]×⌽R1[K;]-L⊣R1←R⌿L
+	L←(L⌿⍨~msk)⍪⊖msk⌿L ⋄ R←(≢L)↑R⌿⍨~msk
+	
+⍝ Now here comes the part you need to do...
+⍝ On eacn iteration, you need to find the point that is the maximum distance 
+⍝ from the two vertices that "bound" it's vertex group (indicated by R and K), 
+⍝ and then add that to the set of vertices on the hull (indicated by R). 
+⍝ We can compute the distance of the vertices to their respective lines with 
+⍝ the following expression:
+⍝ 
+⍝ D←(-/D[K;]×⌽R1[K;]-L)÷(0.5*⍨+/×⍨D←(1⊖R1)-R1←R⌿L)[K]
+⍝ 
+⍝ Here is a nice idiom you might want to keep in mind:
+⍝
+⍝ M[R⌿⍋K[M←⍒D]]	Elements with maximum distance (D) grouped by key K,
+⍝ 			where R is a Boolean vector indicating subgroups.
+⍝ 
+⍝ Write an iterative algorithm that continues to do this until we are done 
+⍝ adding vertices to the hull! 
+
+	∘∘∘ ⍝ You implement the iteration here!
+
+⍝ At the end, if R contains all of our vertices on the hull, we can return 
+⍝ those like so:
+
+	R⌿L
+}
+
+:EndNamespace
