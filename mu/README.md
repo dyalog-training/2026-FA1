@@ -37,6 +37,11 @@ If you wish to use the fenster rendering, you'll need to compile
 	cl /LD fenster.c user32.lib gdi32.lib 
 	# Linux
 	cc -shared -o fenster.so fenster.c -lX11 -lasound
+	# macOS
+	cc -shared -o fenster.dylib fenster.c -framework Cocoa -framework AudioToolbox
+
+On macOS the window opens in front of your session but does not take
+keyboard focus until you click it.
 
 You should be able to then run the `mu.demo` and see everything working. 
 
