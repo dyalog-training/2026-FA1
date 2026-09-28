@@ -53,6 +53,7 @@ struct fenster {
   int mouse;
 #if defined(__APPLE__)
   id wnd;
+  int closed; /* set when the user clicks the window's close button */
 #elif defined(_WIN32)
   HWND hwnd;
   int display_width;
@@ -80,6 +81,10 @@ FENSTER_API int64_t fenster_time(void);
 
 #ifndef FENSTER_HEADER
 #if defined(__APPLE__)
+#include <dispatch/dispatch.h>
+#include <dlfcn.h>
+#include <pthread.h>
+
 #define msg(r, o, s) ((r(*)(id, SEL))objc_msgSend)(o, sel_getUid(s))
 #define msg1(r, o, s, A, a)                                                    \
   ((r(*)(id, SEL, A))objc_msgSend)(o, sel_getUid(s), a)
@@ -95,12 +100,72 @@ FENSTER_API int64_t fenster_time(void);
 extern id const NSDefaultRunLoopMode;
 extern id const NSApp;
 
+/* AppKit may only be used from the main thread. A host may call us from
+ * another thread while its main thread runs [NSApp run] -- the Dyalog APL
+ * interpreter does this. Then all Cocoa work is handed to the main thread,
+ * and the host's run loop delivers events to the view methods below.
+ * Otherwise (we are on the main thread) fenster_loop pumps events itself. */
+struct fenster_call {
+  void *ctx;
+  void (*fn)(void *);
+};
+
+extern void *objc_autoreleasePoolPush(void);
+extern void objc_autoreleasePoolPop(void *);
+
+static void fenster_call_main(void *p) {
+  struct fenster_call *c = (struct fenster_call *)p;
+  void *pool = objc_autoreleasePoolPush();
+  c->fn(c->ctx);
+  objc_autoreleasePoolPop(pool);
+}
+
+static void fenster_on_main(void *ctx, void (*fn)(void *)) {
+  struct fenster_call c = {ctx, fn};
+  if (pthread_main_np())
+    fenster_call_main(&c);
+  else
+    dispatch_sync_f(dispatch_get_main_queue(), &c, fenster_call_main);
+}
+
+/* Off the main thread we depend on the host servicing the main queue; check
+ * that it does rather than risk blocking forever in dispatch_sync. */
+static dispatch_semaphore_t fenster_ping_sem;
+static void fenster_ping_init(void *p) {
+  (void)p;
+  fenster_ping_sem = dispatch_semaphore_create(0);
+}
+static void fenster_ping(void *p) {
+  (void)p;
+  dispatch_semaphore_signal(fenster_ping_sem);
+}
+static int fenster_main_alive(void) {
+  static dispatch_once_t once;
+  dispatch_once_f(&once, NULL, fenster_ping_init);
+  dispatch_async_f(dispatch_get_main_queue(), NULL, fenster_ping);
+  return !dispatch_semaphore_wait(
+      fenster_ping_sem, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+}
+
+static char fenster_key; /* associated-object key: view -> struct fenster */
+
+static struct fenster *fenster_of(id v) {
+  return (struct fenster *)objc_getAssociatedObject(v, &fenster_key);
+}
+
+// clang-format off
+static const uint8_t FENSTER_KEYCODES[128] = {65,83,68,70,72,71,90,88,67,86,0,66,81,87,69,82,89,84,49,50,51,52,54,53,61,57,55,45,56,48,93,79,85,91,73,80,10,76,74,39,75,59,92,44,47,78,77,46,9,32,96,8,0,27,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,26,2,3,127,0,5,0,4,0,20,19,18,17,0};
+// clang-format on
+
 static void fenster_draw_rect(id v, SEL s, CGRect r) {
   (void)r, (void)s;
-  struct fenster *f = (struct fenster *)objc_getAssociatedObject(v, "fenster");
+  struct fenster *f = fenster_of(v);
+  if (!f)
+    return;
   CGContextRef context =
       msg(CGContextRef, msg(id, cls("NSGraphicsContext"), "currentContext"),
-          "graphicsPort");
+          "CGContext");
+  CGContextSetInterpolationQuality(context, kCGInterpolationNone);
   CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
   CGDataProviderRef provider = CGDataProviderCreateWithData(
       NULL, f->buf, f->width * f->height * 4, NULL);
@@ -114,83 +179,190 @@ static void fenster_draw_rect(id v, SEL s, CGRect r) {
   CGImageRelease(img);
 }
 
-static BOOL fenster_should_close(id v, SEL s, id w) {
-  (void)v, (void)s, (void)w;
-  msg1(void, NSApp, "terminate:", id, NSApp);
-  return YES;
+static void fenster_mouse_event(id v, SEL s, id ev) {
+  (void)s;
+  struct fenster *f = fenster_of(v);
+  if (!f)
+    return;
+  CGPoint xy = msg(CGPoint, ev, "locationInWindow");
+  f->x = (int)xy.x;
+  f->y = (int)(f->height - xy.y);
+  switch (msg(NSUInteger, ev, "type")) {
+  case 1: /* NSEventTypeLeftMouseDown */
+    f->mouse |= 1;
+    break;
+  case 2: /* NSEventTypeLeftMouseUp */
+    f->mouse &= ~1;
+    break;
+  }
 }
 
-FENSTER_API int fenster_open(struct fenster *f) {
+static void fenster_key_event(id v, SEL s, id ev) {
+  (void)s;
+  struct fenster *f = fenster_of(v);
+  if (!f)
+    return;
+  NSUInteger evtype = msg(NSUInteger, ev, "type");
+  if (evtype == 10 || evtype == 11) { /* NSEventTypeKeyDown, KeyUp */
+    NSUInteger k = msg(NSUInteger, ev, "keyCode");
+    f->keys[k < 127 ? FENSTER_KEYCODES[k] : 0] = evtype == 10;
+  }
+  NSUInteger mod = msg(NSUInteger, ev, "modifierFlags") >> 17;
+  f->mod = (mod & 0xc) | ((mod & 1) << 1) | ((mod >> 1) & 1);
+}
+
+static BOOL fenster_yes(id v, SEL s) { return (void)v, (void)s, YES; }
+static BOOL fenster_yes1(id v, SEL s, id a) {
+  return (void)v, (void)s, (void)a, YES;
+}
+
+/* Closing the window must not terminate the host process (e.g. an APL
+ * interpreter), so just flag it and let fenster_loop report it. */
+static BOOL fenster_should_close(id v, SEL s, id w) {
+  (void)v, (void)s;
+  struct fenster *f = fenster_of(msg(id, w, "contentView"));
+  if (f)
+    f->closed = 1;
+  return NO;
+}
+
+/* The classes below are registered with the Objective-C runtime and outlive
+ * this image, so if we are a shared library a host must never unload us (as
+ * Dyalog APL does once no external function refers to us). Pin the image. */
+__attribute__((constructor)) static void fenster_pin(void) {
+  Dl_info info;
+  if (dladdr((void *)fenster_pin, &info) && info.dli_fname)
+    dlopen(info.dli_fname, RTLD_NOLOAD | RTLD_NODELETE);
+}
+
+/* Classes can only be registered once per process, but a host may open
+ * several windows over its lifetime. */
+static Class fenster_classes(Class *view) {
+  Class d = (Class)cls("FensterDelegate"), c = (Class)cls("FensterView");
+  if (!d) {
+    d = objc_allocateClassPair((Class)cls("NSObject"), "FensterDelegate", 0);
+    class_addMethod(d, sel_getUid("windowShouldClose:"),
+                    (IMP)fenster_should_close, "c@:@");
+    objc_registerClassPair(d);
+  }
+  if (!c) {
+    static const char *mouse[] = {"mouseDown:", "mouseUp:", "mouseMoved:",
+                                  "mouseDragged:"};
+    static const char *keys[] = {"keyDown:", "keyUp:", "flagsChanged:"};
+    c = objc_allocateClassPair((Class)cls("NSView"), "FensterView", 0);
+    class_addMethod(c, sel_getUid("drawRect:"), (IMP)fenster_draw_rect,
+                    "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
+    class_addMethod(c, sel_getUid("acceptsFirstResponder"), (IMP)fenster_yes,
+                    "c@:");
+    class_addMethod(c, sel_getUid("acceptsFirstMouse:"), (IMP)fenster_yes1,
+                    "c@:@");
+    for (int i = 0; i < 4; i++)
+      class_addMethod(c, sel_getUid(mouse[i]), (IMP)fenster_mouse_event,
+                      "v@:@");
+    for (int i = 0; i < 3; i++)
+      class_addMethod(c, sel_getUid(keys[i]), (IMP)fenster_key_event, "v@:@");
+    objc_registerClassPair(c);
+  }
+  *view = c;
+  return d;
+}
+
+/* Dispatch pending events without blocking. Only for when the caller owns
+ * the main thread: otherwise the host's run loop does this. */
+static void fenster_pump(void) {
+  id ev;
+  while ((ev = msg4(id, NSApp,
+                    "nextEventMatchingMask:untilDate:inMode:dequeue:",
+                    NSUInteger, NSUIntegerMax, id, NULL, id,
+                    NSDefaultRunLoopMode, BOOL, YES)))
+    msg1(void, NSApp, "sendEvent:", id, ev);
+}
+
+static void fenster_open_main(void *p) {
+  struct fenster *f = (struct fenster *)p;
+  Class c;
   msg(id, cls("NSApplication"), "sharedApplication");
   msg1(void, NSApp, "setActivationPolicy:", NSInteger, 0);
+  f->closed = 0;
   f->wnd = msg4(id, msg(id, cls("NSWindow"), "alloc"),
                 "initWithContentRect:styleMask:backing:defer:", CGRect,
                 CGRectMake(0, 0, f->width, f->height), NSUInteger, 3,
                 NSUInteger, 2, BOOL, NO);
-  Class windelegate =
-      objc_allocateClassPair((Class)cls("NSObject"), "FensterDelegate", 0);
-  class_addMethod(windelegate, sel_getUid("windowShouldClose:"),
-                  (IMP)fenster_should_close, "c@:@");
-  objc_registerClassPair(windelegate);
+  if (!f->wnd)
+    return;
+  msg1(void, f->wnd, "setReleasedWhenClosed:", BOOL, NO);
+  Class d = fenster_classes(&c);
   msg1(void, f->wnd, "setDelegate:", id,
-       msg(id, msg(id, (id)windelegate, "alloc"), "init"));
-  Class c = objc_allocateClassPair((Class)cls("NSView"), "FensterView", 0);
-  class_addMethod(c, sel_getUid("drawRect:"), (IMP)fenster_draw_rect, "i@:@@");
-  objc_registerClassPair(c);
+       msg(id, msg(id, (id)d, "alloc"), "init"));
 
   id v = msg(id, msg(id, (id)c, "alloc"), "init");
+  objc_setAssociatedObject(v, &fenster_key, (id)f, OBJC_ASSOCIATION_ASSIGN);
   msg1(void, f->wnd, "setContentView:", id, v);
-  objc_setAssociatedObject(v, "fenster", (id)f, OBJC_ASSOCIATION_ASSIGN);
+  msg1(BOOL, f->wnd, "makeFirstResponder:", id, v);
+  /* Report mouse movement even before the window is focused. Options are
+   * NSTrackingMouseMoved | NSTrackingActiveAlways | NSTrackingInVisibleRect */
+  id ta = msg(id, cls("NSTrackingArea"), "alloc");
+  ta = ((id(*)(id, SEL, CGRect, NSUInteger, id, id))objc_msgSend)(
+      ta, sel_getUid("initWithRect:options:owner:userInfo:"), CGRectZero,
+      0x02 | 0x80 | 0x200, v, nil);
+  msg1(void, v, "addTrackingArea:", id, ta);
+  msg(void, ta, "release");
+  msg(void, v, "release");
 
   id title = msg1(id, cls("NSString"), "stringWithUTF8String:", const char *,
                   f->title);
   msg1(void, f->wnd, "setTitle:", id, title);
   msg1(void, f->wnd, "makeKeyAndOrderFront:", id, nil);
   msg(void, f->wnd, "center");
-  msg1(void, NSApp, "activateIgnoringOtherApps:", BOOL, YES);
-  return 0;
+  /* macOS 14+ ignores activateIgnoringOtherApps:, so at least make sure the
+   * window is visible in front even if our process is not activated. */
+  msg(void, f->wnd, "orderFrontRegardless");
+  if (msg1(BOOL, NSApp, "respondsToSelector:", SEL, sel_getUid("activate")))
+    msg(void, NSApp, "activate");
+  else
+    msg1(void, NSApp, "activateIgnoringOtherApps:", BOOL, YES);
+}
+
+FENSTER_API int fenster_open(struct fenster *f) {
+  f->wnd = nil;
+  if (!pthread_main_np() && !fenster_main_alive())
+    return -1;
+  fenster_on_main(f, fenster_open_main);
+  return f->wnd ? 0 : -1;
+}
+
+static void fenster_close_main(void *p) {
+  struct fenster *f = (struct fenster *)p;
+  id d = msg(id, f->wnd, "delegate");
+  objc_setAssociatedObject(msg(id, f->wnd, "contentView"), &fenster_key, nil,
+                           OBJC_ASSOCIATION_ASSIGN);
+  msg1(void, f->wnd, "setDelegate:", id, nil);
+  msg(void, f->wnd, "close");
+  msg(void, f->wnd, "release");
+  msg(void, d, "release");
+  f->wnd = nil;
 }
 
 FENSTER_API void fenster_close(struct fenster *f) {
-  msg(void, f->wnd, "close");
+  if (!f->wnd)
+    return;
+  fenster_on_main(f, fenster_close_main);
+  if (pthread_main_np())
+    fenster_pump(); /* so the window actually disappears */
 }
 
-// clang-format off
-static const uint8_t FENSTER_KEYCODES[128] = {65,83,68,70,72,71,90,88,67,86,0,66,81,87,69,82,89,84,49,50,51,52,54,53,61,57,55,45,56,48,93,79,85,91,73,80,10,76,74,39,75,59,92,44,47,78,77,46,9,32,96,8,0,27,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,26,2,3,127,0,5,0,4,0,20,19,18,17,0};
-// clang-format on
+static void fenster_display_main(void *p) {
+  struct fenster *f = (struct fenster *)p;
+  msg(void, msg(id, f->wnd, "contentView"), "display");
+}
+
 FENSTER_API int fenster_loop(struct fenster *f) {
-  msg1(void, msg(id, f->wnd, "contentView"), "setNeedsDisplay:", BOOL, YES);
-  id ev = msg4(id, NSApp,
-               "nextEventMatchingMask:untilDate:inMode:dequeue:", NSUInteger,
-               NSUIntegerMax, id, NULL, id, NSDefaultRunLoopMode, BOOL, YES);
-  if (!ev)
-    return 0;
-  NSUInteger evtype = msg(NSUInteger, ev, "type");
-  switch (evtype) {
-  case 1: /* NSEventTypeMouseDown */
-    f->mouse |= 1;
-    break;
-  case 2: /* NSEventTypeMouseUp*/
-    f->mouse &= ~1;
-    break;
-  case 5:
-  case 6: { /* NSEventTypeMouseMoved */
-    CGPoint xy = msg(CGPoint, ev, "locationInWindow");
-    f->x = (int)xy.x;
-    f->y = (int)(f->height - xy.y);
-    return 0;
-  }
-  case 10: /*NSEventTypeKeyDown*/
-  case 11: /*NSEventTypeKeyUp:*/ {
-    NSUInteger k = msg(NSUInteger, ev, "keyCode");
-    f->keys[k < 127 ? FENSTER_KEYCODES[k] : 0] = evtype == 10;
-    NSUInteger mod = msg(NSUInteger, ev, "modifierFlags") >> 17;
-    f->mod = (mod & 0xc) | ((mod & 1) << 1) | ((mod >> 1) & 1);
-    return 0;
-  }
-  }
-  msg1(void, NSApp, "sendEvent:", id, ev);
-  return 0;
+  if (f->closed || !f->wnd)
+    return -1;
+  fenster_on_main(f, fenster_display_main);
+  if (pthread_main_np())
+    fenster_pump();
+  return f->closed ? -1 : 0;
 }
 #elif defined(_WIN32)
 #ifndef MIN
